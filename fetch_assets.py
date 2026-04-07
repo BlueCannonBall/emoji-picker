@@ -15,16 +15,7 @@ def unified_to_char(unified):
     """Convert hex string (e.g. '1F600-1F601') to UTF-8 characters."""
     return "".join(chr(int(x, 16)) for x in unified.split("-"))
 
-def fetch_emoji_bytes(emoji_item):
-    unified = emoji_item['unified']
-    name = emoji_item.get('name', 'UNKNOWN')
-    short_names = " ".join(emoji_item.get('short_names', []))
-    category = emoji_item.get('category', '')
-    subcategory = emoji_item.get('subcategory', '')
-    
-    tags = f"{short_names} {category} {subcategory}".lower()
-    char = unified_to_char(unified)
-    
+def fetch_image_from_twemoji(unified):
     # Twemoji uses lowercase hex IDs
     codepoint = unified.lower()
     possible_ids = [codepoint]
@@ -37,22 +28,52 @@ def fetch_emoji_bytes(emoji_item):
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req) as response:
-                img_data = response.read()
-            return {
-                "char": char, 
-                "name": name,
-                "tags": tags, 
-                "data": img_data, 
-                "eid": eid,
-                "sort": emoji_item.get('sort_order', 9999)
-            }
+                return response.read()
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 continue
         except Exception as e:
             pass
-            
     return None
+
+def fetch_emoji_bytes(emoji_item):
+    unified = emoji_item['unified']
+    name = emoji_item.get('name', 'UNKNOWN')
+    short_names = " ".join(emoji_item.get('short_names', []))
+    category = emoji_item.get('category', '')
+    subcategory = emoji_item.get('subcategory', '')
+    
+    tags = f"{short_names} {category} {subcategory}".lower()
+    char = unified_to_char(unified)
+
+    # Fetch base emoji
+    base_result = fetch_image_from_twemoji(unified)
+    if not base_result:
+        return None
+
+    emoji_info = {
+        "char": char,
+        "name": name,
+        "tags": tags,
+        "data": base_result,
+        "sort": emoji_item.get('sort_order', 9999),
+        "skin_variations": [None] * 5,
+        "skin_chars": [None] * 5,
+    }
+
+    # Fitzpatrick modifiers
+    SKIN_TONES = ["1F3FB", "1F3FC", "1F3FD", "1F3FE", "1F3FF"]
+    
+    variations = emoji_item.get('skin_variations', {})
+    for i, tone in enumerate(SKIN_TONES):
+        if tone in variations:
+            v_unified = variations[tone]['unified']
+            v_data = fetch_image_from_twemoji(v_unified)
+            if v_data:
+                emoji_info["skin_variations"][i] = v_data
+                emoji_info["skin_chars"][i] = unified_to_char(v_unified)
+
+    return emoji_info
 
 def main():
     print("Fetching emoji data source...")
@@ -87,29 +108,50 @@ def main():
         f.write("#include <array>\n")
         f.write("#include <cstddef>\n\n")
         
-        # Write individual binary arrays for images
-        # We keep these const as they are large and don't need to be constexpr themselves
-        for i, e in enumerate(valid_emojis):
-            f.write(f"const unsigned char data_{i}[] = {{")
-            hex_data = [f"0x{b:02x}" for b in e["data"]]
-            f.write(", ".join(hex_data))
-            f.write("};\n")
-            
-        f.write("\nstruct EmojiData {\n")
+        f.write("struct EmojiData {\n")
         f.write("    const char* char_str;\n")
         f.write("    const char* tags;\n")
         f.write("    const char* name;\n")
         f.write("    const unsigned char* image_data;\n")
         f.write("    size_t image_size;\n")
+        f.write("    const char* skin_variations[5];\n")
+        f.write("    const unsigned char* skin_images[5];\n")
+        f.write("    size_t skin_sizes[5];\n")
         f.write("};\n\n")
-        
-        f.write(f"constexpr std::array<EmojiData, {count}> ALL_EMOJIS = {{{{\n")
+
+        # Write individual binary arrays for images
+        for i, e in enumerate(valid_emojis):
+            f.write(f"const unsigned char data_{i}_base[] = {{")
+            f.write(", ".join(f"0x{b:02x}" for b in e["data"]))
+            f.write("};\n")
+            for v_idx, v_data in enumerate(e["skin_variations"]):
+                if v_data:
+                    f.write(f"const unsigned char data_{i}_v{v_idx}[] = {{")
+                    f.write(", ".join(f"0x{b:02x}" for b in v_data))
+                    f.write("};\n")
+            
+        f.write(f"\nconstexpr std::array<EmojiData, {count}> ALL_EMOJIS = {{{{\n")
         for i, e in enumerate(valid_emojis):
             name_str = e["name"].replace('\\', '\\\\').replace('"', '\\"')
             tags_str = e["tags"].replace('\\', '\\\\').replace('"', '\\"')
             char_str = e["char"].replace('\\', '\\\\').replace('"', '\\"')
             size = len(e["data"])
-            f.write(f'    {{"{char_str}", "{tags_str}", "{name_str}", data_{i}, {size}}},\n')
+            
+            # Skin Tone Variations arrays
+            v_chars_list = []
+            for v in e["skin_chars"]:
+                if v:
+                    # Escape backslashes and double quotes in emoji chars
+                    v_esc = v.replace('\\', '\\\\').replace('"', '\\"')
+                    v_chars_list.append(f'"{v_esc}"')
+                else:
+                    v_chars_list.append("nullptr")
+            v_chars = "{" + ", ".join(v_chars_list) + "}"
+            
+            v_images = "{" + ", ".join(f"data_{i}_v{vi}" if vd else "nullptr" for vi, vd in enumerate(e["skin_variations"])) + "}"
+            v_sizes = "{" + ", ".join(str(len(vd)) if vd else "0" for vd in e["skin_variations"]) + "}"
+
+            f.write(f'    {{"{char_str}", "{tags_str}", "{name_str}", data_{i}_base, {size}, {v_chars}, {v_images}, {v_sizes}}},\n')
         f.write("}};\n")
 
     print(f"Optimized {HEADER_FILE} with constexpr std::array.")

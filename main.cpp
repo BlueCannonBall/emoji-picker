@@ -23,6 +23,7 @@ extern "C" {
 
 #include "emoji_data.hpp"
 #include "theme.hpp"
+#include <FL/Fl_Menu_Item.H>
 
 static bool keep_alive = false;
 
@@ -168,6 +169,30 @@ public:
                     int img_y = item_y + (item_size - images[real_idx]->h()) / 2;
                     images[real_idx]->draw(img_x, img_y);
                 }
+
+                // Draw corner fold for emojis with variations
+                const auto& item = ALL_EMOJIS[real_idx];
+                bool has_variations = false;
+                for (int v = 0; v < 5; ++v) {
+                    if (item.skin_variations[v]) {
+                        has_variations = true;
+                        break;
+                    }
+                }
+
+                if (has_variations) {
+                    if (is_dark_mode()) {
+                        fl_color(fl_rgb_color(160, 160, 160)); // Medium-light grey for dark mode
+                    } else {
+                        fl_color(fl_rgb_color(180, 180, 180)); // Medium-dark grey for light mode
+                    }
+                    const int fs = 6;
+                    fl_begin_polygon();
+                    fl_vertex(item_x + item_size, item_y + item_size - fs);
+                    fl_vertex(item_x + item_size - fs, item_y + item_size);
+                    fl_vertex(item_x + item_size, item_y + item_size);
+                    fl_end_polygon();
+                }
             }
         }
         fl_pop_clip();
@@ -208,7 +233,12 @@ public:
                 if (clicked_idx < static_cast<int>(filtered_indices.size())) {
                     selected_idx = clicked_idx;
                     redraw();
-                    do_callback();
+
+                    if (Fl::event_button() == 3) { // Right Click
+                        show_skin_tone_menu(clicked_idx);
+                    } else {
+                        do_callback();
+                    }
                     return 1;
                 }
             }
@@ -216,6 +246,53 @@ public:
         }
         }
         return Fl_Widget::handle(event);
+    }
+
+    void show_skin_tone_menu(int idx) {
+        const auto& item = ALL_EMOJIS[filtered_indices[idx]];
+
+        bool has_variations = false;
+        for (int i = 0; i < 5; ++i) {
+            if (item.skin_variations[i]) {
+                has_variations = true;
+                break;
+            }
+        }
+        if (!has_variations) return;
+
+        Fl_Menu_Item menu_items[6]; // 5 tones + null terminator
+        memset(menu_items, 0, sizeof(menu_items));
+
+        struct Cleanup {
+            std::vector<Fl_PNG_Image*> imgs;
+            ~Cleanup() {
+                for (auto i : imgs) delete i;
+            }
+        } cleanup;
+
+        int count = 0;
+        for (int i = 0; i < 5; ++i) {
+            if (item.skin_variations[i]) {
+                menu_items[count].text = " "; // At least one space for label width
+                menu_items[count].labeltype(FL_NORMAL_LABEL);
+
+                Fl_PNG_Image* img = new Fl_PNG_Image("v", item.skin_images[i], item.skin_sizes[i]);
+                img->scale(32, 32, 0, 1);
+                menu_items[count].image(img);
+                menu_items[count].user_data_ = (void*) item.skin_variations[i];
+                cleanup.imgs.push_back(img);
+                count++;
+            }
+        }
+        // Null terminator (already 0 from memset, but being explicit)
+        menu_items[count].text = nullptr;
+
+        const Fl_Menu_Item* picked = menu_items->popup(Fl::event_x(), Fl::event_y());
+        if (picked && picked->user_data_) {
+            const char* chosen = (const char*) picked->user_data_;
+            extern void perform_emoji_action(const char* emoji, Fl_Window* win);
+            perform_emoji_action(chosen, window());
+        }
     }
 
     void set_selected_idx(int idx) {
@@ -338,14 +415,10 @@ void exit_timeout_cb(void* data) {
     keep_alive = false;
 }
 
-void grid_cb(Fl_Widget* w, void* data) {
-    EmojiGrid* grid = (EmojiGrid*) w;
-    Fl_Double_Window* win = (Fl_Double_Window*) data;
-
-    const char* emoji_char = grid->get_selected();
+void perform_emoji_action(const char* emoji_char, Fl_Window* win) {
     if (!emoji_char) return;
 
-    // Use native FLTK clipboard instead of spawning a subprocess
+    // Use native FLTK clipboard
     Fl::copy(emoji_char, strlen(emoji_char), 1);
 
     win->hide();
@@ -360,9 +433,14 @@ void grid_cb(Fl_Widget* w, void* data) {
     }
 
     // Do not exit(0) immediately; stay in background to serve the clipboard selection.
-    // Exit after 10 seconds of inactivity or when the timeout is reached by clearing keep_alive.
     keep_alive = true;
     Fl::add_timeout(10.0, exit_timeout_cb);
+}
+
+void grid_cb(Fl_Widget* w, void* data) {
+    EmojiGrid* grid = (EmojiGrid*) w;
+    Fl_Double_Window* win = (Fl_Double_Window*) data;
+    perform_emoji_action(grid->get_selected(), win);
 }
 
 struct PickerUI {
