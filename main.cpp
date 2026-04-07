@@ -366,7 +366,7 @@ void grid_cb(Fl_Widget* w, void* data) {
     win->hide();
     Fl::flush();
 
-    // Consolidated delay to allow focus to return and clipboard to settle
+    // Delay to allow focus to return and clipboard to settle
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
     paste_emoji();
