@@ -2,6 +2,8 @@
 
 A high-performance, searchable emoji picker for Linux built with **FLTK 1.4** and **libxdo**.
 
+<img width="605" height="766" alt="image" src="https://github.com/user-attachments/assets/095f7ca3-f0e8-4573-9bfb-179aea02696e" />
+
 ## Features
 - **🚀 Instant Startup**: All ~1,850 Twemoji assets are embedded directly into the binary as byte arrays, resulting in zero filesystem I/O during rendering.
 - **🔍 Fast Search**: Instant filtering as you type.
