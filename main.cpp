@@ -143,7 +143,8 @@ public:
         fl_color(color());
         fl_rectf(x(), y(), w(), h());
 
-        Fl_Scroll* scroll = (Fl_Scroll*) parent();
+        Fl_Scroll* scroll = dynamic_cast<Fl_Scroll*>(parent());
+        if (!scroll) return;
         int view_y = scroll->yposition();
         int view_h = scroll->h();
 
@@ -161,13 +162,7 @@ public:
                 int item_x = x() + c * item_size;
                 int item_y = y() + r * item_size;
 
-                // Draw background box for emoji
-                if (idx != selected_idx) {
-                    fl_color(color());
-                    fl_rectf(item_x, item_y, item_size, item_size);
-                }
-
-                // Highlight selected
+                // Highlight selected only (background is already cleared by Line 141)
                 if (idx == selected_idx) {
                     fl_color(FL_SELECTION_COLOR);
                     fl_rectf(item_x, item_y, item_size, item_size);
