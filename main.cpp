@@ -12,6 +12,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 extern "C" {
 #include <xdo.h>
@@ -352,6 +354,9 @@ void grid_cb(Fl_Widget* w, void* data) {
 
     win->hide();
     Fl::flush();
+
+    // Small delay to allow focus to return to the previous window
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     paste_emoji(emoji_char);
     exit(0);
