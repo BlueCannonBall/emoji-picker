@@ -19,6 +19,21 @@ extern "C" {
 #include "emoji_data.hpp"
 #include "theme.hpp"
 
+/**
+ * Encapsulates the logic for pasting an emoji into the previously active window.
+ */
+void paste_emoji(const char* emoji_char) {
+    if (!emoji_char) return;
+
+    xdo_t* xdo = xdo_new(NULL);
+    if (xdo) {
+        Window active_window;
+        xdo_get_active_window(xdo, &active_window);
+        xdo_enter_text_window(xdo, active_window, emoji_char, 12000);
+        xdo_free(xdo);
+    }
+}
+
 class EmojiGrid : public Fl_Widget {
     std::vector<int> filtered_indices;
     std::vector<Fl_Image*> images;
@@ -26,18 +41,50 @@ class EmojiGrid : public Fl_Widget {
     int img_size = 36;  // scaled image size
     int cols = 1;
     int selected_idx = 0;
+    std::vector<std::string> lower_tags;
+
+    static void idle_prep(void* data) {
+        EmojiGrid* grid = (EmojiGrid*)data;
+        for (size_t i = 0; i < ALL_EMOJIS.size(); ++i) {
+            if (!grid->images[i]) {
+                grid->prepare_image(i);
+                return; // Give control back to UI
+            }
+        }
+        Fl::remove_idle(idle_prep, data);
+    }
+
+    void prepare_image(int emoji_idx) {
+        if (images[emoji_idx]) return;
+        
+        const auto& data = ALL_EMOJIS[emoji_idx];
+        Fl_PNG_Image* img = new Fl_PNG_Image("mem", data.image_data, data.image_size);
+        
+        if (img && img->d() != 0) {
+            // Use logical scaling (non-destructive in FLTK 1.4) to keep icons sharp when zoomed
+            img->scale(img_size, img_size, 0, 1);
+            images[emoji_idx] = img;
+        } else {
+            images[emoji_idx] = img; // Could be nullptr or failed image
+        }
+    }
 
 public:
     EmojiGrid(int X, int Y, int W, int H): Fl_Widget(X, Y, W, H) {
         images.resize(ALL_EMOJIS.size(), nullptr);
+        lower_tags.reserve(ALL_EMOJIS.size());
         for (size_t i = 0; i < ALL_EMOJIS.size(); ++i) {
             filtered_indices.push_back(i);
+            std::string tags = ALL_EMOJIS[i].tags;
+            std::transform(tags.begin(), tags.end(), tags.begin(), ::tolower);
+            lower_tags.push_back(std::move(tags));
         }
         cols = W / item_size;
         if (cols < 1) cols = 1;
         int rows = (filtered_indices.size() + cols - 1) / cols;
         int expected_h = rows * item_size;
         Fl_Widget::resize(X, Y, W, expected_h);
+        Fl::add_idle(idle_prep, this);
     }
 
     ~EmojiGrid() {
@@ -56,9 +103,7 @@ public:
                 filtered_indices.push_back(i);
                 continue;
             }
-            std::string tags = ALL_EMOJIS[i].tags;
-            std::transform(tags.begin(), tags.end(), tags.begin(), ::tolower);
-            if (tags.find(q) != std::string::npos) {
+            if (lower_tags[i].find(q) != std::string::npos) {
                 filtered_indices.push_back(i);
             }
         }
@@ -124,15 +169,9 @@ public:
                     fl_rectf(item_x, item_y, item_size, item_size);
                 }
 
-                // Lazily load and set logical drawing scale
+                // Use pre-decoded images from cache
                 if (!images[real_idx]) {
-                    Fl_PNG_Image* orig = new Fl_PNG_Image("mem", ALL_EMOJIS[real_idx].image_data, ALL_EMOJIS[real_idx].image_size);
-                    if (orig && orig->d() != 0) {
-                        orig->scale(img_size, img_size, 0, 1);
-                        images[real_idx] = orig;
-                    } else {
-                        images[real_idx] = orig;
-                    }
+                    prepare_image(real_idx); // Emergency prepare if idle hadn't finished
                 }
 
                 if (images[real_idx] && (images[real_idx]->w() > 0 || images[real_idx]->d() != 0)) {
@@ -152,10 +191,11 @@ public:
             int my = Fl::event_y() - y();
             int c = mx / item_size;
             int r = my / item_size;
+            
             if (c >= 0 && c < cols && r >= 0) {
-                int idx = r * cols + c;
-                if (idx < static_cast<int>(filtered_indices.size())) {
-                    selected_idx = idx;
+                int clicked_idx = r * cols + c;
+                if (clicked_idx < static_cast<int>(filtered_indices.size())) {
+                    selected_idx = clicked_idx;
                     redraw();
                     do_callback();
                     return 1;
@@ -193,6 +233,29 @@ public:
         return nullptr;
     }
 };
+
+/**
+ * Finds and sets the emoji picker app icon from the embedded dataset.
+ */
+void setup_window_icon(Fl_Double_Window* win) {
+    const unsigned char* icon_data = nullptr;
+    size_t icon_size = 0;
+    
+    for (const auto& emoji : ALL_EMOJIS) {
+        if (std::string_view(emoji.char_str) == "😂") {
+            icon_data = emoji.image_data;
+            icon_size = emoji.image_size;
+            break;
+        }
+    }
+    
+    if (icon_data) {
+        Fl_PNG_Image* app_icon = new Fl_PNG_Image("icon", icon_data, icon_size);
+        if (app_icon && app_icon->d() != 0) {
+            win->icon(app_icon);
+        }
+    }
+}
 
 class EmojiScroll : public Fl_Scroll {
 public:
@@ -264,43 +327,20 @@ void grid_cb(Fl_Widget* w, void* data) {
     win->hide();
     Fl::flush();
 
-    xdo_t* xdo = xdo_new(NULL);
-    if (xdo) {
-        Window active_window;
-        xdo_get_active_window(xdo, &active_window);
-        xdo_enter_text_window(xdo, active_window, emoji_char, 12000);
-        xdo_free(xdo);
-    }
-
+    paste_emoji(emoji_char);
     exit(0);
 }
 
-int main() {
-    Fl::scheme("gtk+");
-    fl_register_images();
+struct PickerUI {
+    SearchInput* input;
+    EmojiGrid* grid;
+};
 
-    configure_fltk_colors();
-
-    Fl_Double_Window* win = new Fl_Double_Window(380, 480, "Emoji Picker");
-    
-    const unsigned char* icon_data = nullptr;
-    size_t icon_size = 0;
-    for (const auto& emoji : ALL_EMOJIS) {
-        if (std::string_view(emoji.char_str) == "😂") {
-            icon_data = emoji.image_data;
-            icon_size = emoji.image_size;
-            break;
-        }
-    }
-    
-    if (icon_data) {
-        Fl_PNG_Image* app_icon = new Fl_PNG_Image("icon", icon_data, icon_size);
-        if (app_icon && app_icon->d() != 0) {
-            win->icon(app_icon);
-        }
-    }
-
-    Fl_Flex* flex = new Fl_Flex(0, 0, 380, 480);
+/**
+ * Constructs the main UI layout and returns handles to key widgets.
+ */
+PickerUI create_ui(Fl_Double_Window* win) {
+    Fl_Flex* flex = new Fl_Flex(0, 0, win->w(), win->h());
     flex->type(Fl_Flex::COLUMN);
     flex->margin(5);
     flex->gap(5);
@@ -314,7 +354,7 @@ int main() {
     scroll->box(FL_FLAT_BOX);
     scroll->type(Fl_Scroll::VERTICAL_ALWAYS);
 
-    EmojiGrid* grid = new EmojiGrid(0, 0, 380 - scroll->scrollbar.w(), 440);
+    EmojiGrid* grid = new EmojiGrid(0, 0, win->w() - scroll->scrollbar.w(), win->h() - 40);
     scroll->end();
 
     flex->end();
@@ -324,11 +364,24 @@ int main() {
     input->callback(input_cb, grid);
     grid->callback(grid_cb, win);
 
+    return {input, grid};
+}
+
+int main() {
+    Fl::scheme("gtk+");
+    fl_register_images();
+    configure_fltk_colors();
+
+    Fl_Double_Window* win = new Fl_Double_Window(380, 480, "Emoji Picker");
+    setup_window_icon(win);
+
+    PickerUI ui = create_ui(win);
+
     win->end();
     win->hotspot(win);
     win->show();
 
-    input->take_focus();
+    ui.input->take_focus();
 
     return Fl::run();
 }
