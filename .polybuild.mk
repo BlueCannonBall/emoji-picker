@@ -28,7 +28,7 @@ endif
 c_compiler := $(CC)
 cpp_compiler := $(CXX)
 c_compilation_flags := $(CFLAGS) $(dynamic_flag) `pkg-config $(pkg_config_syntax) --cflags gio-2.0`
-cpp_compilation_flags := -Wall -std=c++20 -Ifltk/build -O3 -pthread $(dynamic_flag) `pkg-config $(pkg_config_syntax) --cflags gio-2.0`
+cpp_compilation_flags := -Wall -std=c++20 -Ifltk/build -O2 -pthread $(dynamic_flag) `pkg-config $(pkg_config_syntax) --cflags gio-2.0`
 link_time_flags := `fltk/build/fltk-config --use-images --ldstaticflags`
 libraries := $(library_flag)xdo `pkg-config $(pkg_config_syntax) --libs gio-2.0`
 prefix := /usr/local/bin
