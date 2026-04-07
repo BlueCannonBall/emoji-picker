@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Emoji Picker
+Comment=Search and paste emojis instantly
+Exec=/usr/local/bin/emoji-picker
+Icon=face-smile
+Terminal=false
+Type=Application
+Categories=Utility;
