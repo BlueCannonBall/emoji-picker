@@ -325,6 +325,7 @@ int main() {
     grid->callback(grid_cb, win);
 
     win->end();
+    win->hotspot(win);
     win->show();
 
     input->take_focus();
