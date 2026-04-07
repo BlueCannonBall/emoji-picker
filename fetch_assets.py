@@ -55,7 +55,7 @@ def fetch_emoji_bytes(emoji_item):
     return None
 
 def main():
-    print("Fetching expanded emoji data source (iamcal/emoji-data)...")
+    print("Fetching emoji data source...")
     req = urllib.request.Request(EMOJI_DATA_URL, headers={'User-Agent': 'Mozilla/5.0'})
     response = urllib.request.urlopen(req).read().decode('utf-8')
     data = json.loads(response)
@@ -63,7 +63,7 @@ def main():
     # Sort by standard sort order field
     data = sorted(data, key=lambda x: x.get('sort_order', 9999))
     
-    print(f"Loaded {len(data)} emojis. Downloading images in parallel...")
+    print(f"Loaded {len(data)} emojis. Downloading images...")
     
     valid_emojis = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
@@ -75,18 +75,20 @@ def main():
             if i % 100 == 0:
                 print(f"Processed {i}/{len(data)}")
 
-    # Final sort after multi-threaded download to ensure order is preserved
+    # Final sort after multi-threaded download
     valid_emojis.sort(key=lambda x: x["sort"])
     
-    print(f"Successfully downloaded {len(valid_emojis)} emojis in standard order.")
+    count = len(valid_emojis)
+    print(f"Successfully downloaded {count} emojis.")
     
     # Generate C++ Header
     with open(HEADER_FILE, "w") as f:
         f.write("#pragma once\n")
-        f.write("#include <vector>\n")
-        f.write("#include <string>\n\n")
+        f.write("#include <array>\n")
+        f.write("#include <cstddef>\n\n")
         
         # Write individual binary arrays for images
+        # We keep these const as they are large and don't need to be constexpr themselves
         for i, e in enumerate(valid_emojis):
             f.write(f"const unsigned char data_{i}[] = {{")
             hex_data = [f"0x{b:02x}" for b in e["data"]]
@@ -96,22 +98,21 @@ def main():
         f.write("\nstruct EmojiData {\n")
         f.write("    const char* char_str;\n")
         f.write("    const char* tags;\n")
-        f.write("    const char* name;\n") # NEW FIELD
+        f.write("    const char* name;\n")
         f.write("    const unsigned char* image_data;\n")
         f.write("    size_t image_size;\n")
         f.write("};\n\n")
         
-        f.write("const std::vector<EmojiData> ALL_EMOJIS = {\n")
+        f.write(f"constexpr std::array<EmojiData, {count}> ALL_EMOJIS = {{{{\n")
         for i, e in enumerate(valid_emojis):
-            # Escape strings for C++
             name_str = e["name"].replace('\\', '\\\\').replace('"', '\\"')
             tags_str = e["tags"].replace('\\', '\\\\').replace('"', '\\"')
             char_str = e["char"].replace('\\', '\\\\').replace('"', '\\"')
             size = len(e["data"])
             f.write(f'    {{"{char_str}", "{tags_str}", "{name_str}", data_{i}, {size}}},\n')
-        f.write("};\n")
+        f.write("}};\n")
 
-    print(f"Re-generated {HEADER_FILE} with tooltips and standard ordering.")
+    print(f"Optimized {HEADER_FILE} with constexpr std::array.")
 
 if __name__ == "__main__":
     main()
