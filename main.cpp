@@ -31,8 +31,7 @@ static bool keep_alive = false;
  * Simulates a Ctrl+V key sequence to paste the current clipboard content.
  */
 void paste_emoji() {
-    xdo_t* xdo = xdo_new(NULL);
-    if (xdo) {
+    if (xdo_t* xdo = xdo_new(NULL)) {
         xdo_send_keysequence_window(xdo, CURRENTWINDOW, "Control+v", 0);
         xdo_free(xdo);
     }
