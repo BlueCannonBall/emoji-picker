@@ -350,7 +350,7 @@ void grid_cb(Fl_Widget* w, void* data) {
     Fl::flush();
 
     // Delay to allow focus to return and clipboard to settle
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     if (xdo_t* xdo = xdo_new(nullptr)) {
         xdo_send_keysequence_window(xdo, CURRENTWINDOW, "Control+v", 0);
