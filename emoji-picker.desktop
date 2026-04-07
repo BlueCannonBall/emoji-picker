@@ -2,7 +2,7 @@
 Name=Emoji Picker
 Comment=Search and paste emojis instantly
 Exec=/usr/local/bin/emoji-picker
-Icon=face-smile
+Icon=emoji-picker
 Terminal=false
 Type=Application
 Categories=Utility;
