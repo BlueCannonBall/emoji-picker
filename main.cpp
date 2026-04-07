@@ -33,11 +33,13 @@ class EmojiGrid : public Fl_Widget {
     int img_size = 36;  // scaled image size
     int cols = 1;
     int selected_idx = 0;
-    std::vector<std::string> lower_tags;
+    std::vector<std::string> search_index;
+    size_t prep_index = 0;
 
     static void idle_prep(void* data) {
         EmojiGrid* grid = (EmojiGrid*) data;
-        for (size_t i = 0; i < ALL_EMOJIS.size(); ++i) {
+        while (grid->prep_index < ALL_EMOJIS.size()) {
+            size_t i = grid->prep_index++;
             if (!grid->images[i]) {
                 grid->prepare_image(i);
                 return; // Give control back to UI
@@ -64,12 +66,12 @@ class EmojiGrid : public Fl_Widget {
 public:
     EmojiGrid(int X, int Y, int W, int H): Fl_Widget(X, Y, W, H) {
         images.resize(ALL_EMOJIS.size(), nullptr);
-        lower_tags.reserve(ALL_EMOJIS.size());
+        search_index.reserve(ALL_EMOJIS.size());
         for (size_t i = 0; i < ALL_EMOJIS.size(); ++i) {
             filtered_indices.push_back(i);
-            std::string tags = ALL_EMOJIS[i].tags;
-            std::transform(tags.begin(), tags.end(), tags.begin(), ::tolower);
-            lower_tags.push_back(std::move(tags));
+            std::string searchable = std::string(ALL_EMOJIS[i].tags) + " " + ALL_EMOJIS[i].name;
+            std::transform(searchable.begin(), searchable.end(), searchable.begin(), ::tolower);
+            search_index.push_back(std::move(searchable));
         }
         cols = W / item_size;
         if (cols < 1) cols = 1;
@@ -95,7 +97,7 @@ public:
                 filtered_indices.push_back(i);
                 continue;
             }
-            if (lower_tags[i].find(q) != std::string::npos) {
+            if (search_index[i].find(q) != std::string::npos) {
                 filtered_indices.push_back(i);
             }
         }
