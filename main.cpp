@@ -1,5 +1,4 @@
 #include <FL/Fl.H>
-#include <FL/Fl_Box.H>
 #include <FL/Fl_Double_Window.H>
 #include <FL/Fl_Flex.H>
 #include <FL/Fl_Input.H>
@@ -8,6 +7,9 @@
 #include <FL/Fl_Shared_Image.H>
 #include <FL/Fl_Tooltip.H>
 #include <FL/fl_draw.H>
+#include <FL/x.H>
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
 #include <algorithm>
 #include <chrono>
 #include <string>
@@ -23,19 +25,6 @@ extern "C" {
 #include "theme.hpp"
 
 static bool keep_alive = false;
-
-/**
- * Encapsulates the logic for pasting an emoji into the previously active window.
- */
-/**
- * Simulates a Ctrl+V key sequence to paste the current clipboard content.
- */
-void paste_emoji() {
-    if (xdo_t* xdo = xdo_new(NULL)) {
-        xdo_send_keysequence_window(xdo, CURRENTWINDOW, "Control+v", 0);
-        xdo_free(xdo);
-    }
-}
 
 class EmojiGrid : public Fl_Widget {
     std::vector<int> filtered_indices;
@@ -363,7 +352,10 @@ void grid_cb(Fl_Widget* w, void* data) {
     // Delay to allow focus to return and clipboard to settle
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
-    paste_emoji();
+    if (xdo_t* xdo = xdo_new(nullptr)) {
+        xdo_send_keysequence_window(xdo, CURRENTWINDOW, "Control+v", 0);
+        xdo_free(xdo);
+    }
 
     // Do not exit(0) immediately; stay in background to serve the clipboard selection.
     // Exit after 10 seconds of inactivity or when the timeout is reached by clearing keep_alive.
@@ -413,6 +405,7 @@ int main() {
     configure_fltk_colors();
 
     Fl_Double_Window* win = new Fl_Double_Window(380, 480, "Emoji Picker");
+    win->set_non_modal();
     setup_window_icon(win);
 
     PickerUI ui = create_ui(win);
@@ -420,6 +413,31 @@ int main() {
     win->end();
     win->hotspot(win);
     win->show();
+    Fl::flush();
+
+    // Force "Always on Top" using X11 atoms for better reliability across Window Managers.
+    {
+        Display* disp = fl_display;
+        Window xid = fl_xid(win);
+        if (disp && xid) {
+            Atom state_above = XInternAtom(disp, "_NET_WM_STATE_ABOVE", False);
+            Atom state_atom = XInternAtom(disp, "_NET_WM_STATE", False);
+
+            XEvent xev;
+            memset(&xev, 0, sizeof(xev));
+            xev.type = ClientMessage;
+            xev.xclient.window = xid;
+            xev.xclient.message_type = state_atom;
+            xev.xclient.format = 32;
+            xev.xclient.data.l[0] = 1; // _NET_WM_STATE_ADD
+            xev.xclient.data.l[1] = state_above;
+            xev.xclient.data.l[2] = 0;
+            xev.xclient.data.l[3] = 0;
+            xev.xclient.data.l[4] = 0;
+
+            XSendEvent(disp, DefaultRootWindow(disp), False, SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+        }
+    }
 
     ui.input->take_focus();
 
