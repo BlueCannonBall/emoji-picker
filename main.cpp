@@ -9,11 +9,11 @@
 #include <FL/Fl_Tooltip.H>
 #include <FL/fl_draw.H>
 #include <algorithm>
+#include <chrono>
 #include <string>
 #include <string_view>
-#include <vector>
-#include <chrono>
 #include <thread>
+#include <vector>
 
 extern "C" {
 #include <xdo.h>
@@ -22,17 +22,18 @@ extern "C" {
 #include "emoji_data.hpp"
 #include "theme.hpp"
 
+static bool keep_alive = false;
+
 /**
  * Encapsulates the logic for pasting an emoji into the previously active window.
  */
-void paste_emoji(const char* emoji_char) {
-    if (!emoji_char) return;
-
+/**
+ * Simulates a Ctrl+V key sequence to paste the current clipboard content.
+ */
+void paste_emoji() {
     xdo_t* xdo = xdo_new(NULL);
     if (xdo) {
-        Window active_window;
-        xdo_get_active_window(xdo, &active_window);
-        xdo_enter_text_window(xdo, active_window, emoji_char, 12000);
+        xdo_send_keysequence_window(xdo, CURRENTWINDOW, "Control+v", 0);
         xdo_free(xdo);
     }
 }
@@ -47,7 +48,7 @@ class EmojiGrid : public Fl_Widget {
     std::vector<std::string> lower_tags;
 
     static void idle_prep(void* data) {
-        EmojiGrid* grid = (EmojiGrid*)data;
+        EmojiGrid* grid = (EmojiGrid*) data;
         for (size_t i = 0; i < ALL_EMOJIS.size(); ++i) {
             if (!grid->images[i]) {
                 grid->prepare_image(i);
@@ -59,10 +60,10 @@ class EmojiGrid : public Fl_Widget {
 
     void prepare_image(int emoji_idx) {
         if (images[emoji_idx]) return;
-        
+
         const auto& data = ALL_EMOJIS[emoji_idx];
         Fl_PNG_Image* img = new Fl_PNG_Image("mem", data.image_data, data.image_size);
-        
+
         if (img && img->d() != 0) {
             // Use logical scaling (non-destructive in FLTK 1.4) to keep icons sharp when zoomed
             img->scale(img_size, img_size, 0, 1);
@@ -194,7 +195,7 @@ public:
             int my = Fl::event_y() - y();
             int c = mx / item_size;
             int r = my / item_size;
-            
+
             if (c >= 0 && c < cols && r >= 0) {
                 int hover_idx = r * cols + c;
                 if (hover_idx < static_cast<int>(filtered_indices.size())) {
@@ -216,7 +217,7 @@ public:
             int my = Fl::event_y() - y();
             int c = mx / item_size;
             int r = my / item_size;
-            
+
             if (c >= 0 && c < cols && r >= 0) {
                 int clicked_idx = r * cols + c;
                 if (clicked_idx < static_cast<int>(filtered_indices.size())) {
@@ -237,7 +238,7 @@ public:
             selected_idx = idx;
             const auto& item = ALL_EMOJIS[filtered_indices[selected_idx]];
             tooltip(item.name); // Update tooltip on keyboard navigation too
-            
+
             int r = selected_idx / cols;
             int item_y = r * item_size;
             Fl_Scroll* scroll = (Fl_Scroll*) parent();
@@ -268,7 +269,7 @@ public:
 void setup_window_icon(Fl_Double_Window* win) {
     const unsigned char* icon_data = nullptr;
     size_t icon_size = 0;
-    
+
     for (const auto& emoji : ALL_EMOJIS) {
         if (std::string_view(emoji.char_str) == "😂") {
             icon_data = emoji.image_data;
@@ -276,7 +277,7 @@ void setup_window_icon(Fl_Double_Window* win) {
             break;
         }
     }
-    
+
     if (icon_data) {
         Fl_PNG_Image* app_icon = new Fl_PNG_Image("icon", icon_data, icon_size);
         if (app_icon && app_icon->d() != 0) {
@@ -345,6 +346,13 @@ void input_cb(Fl_Widget* w, void* data) {
     grid->filter(input->value());
 }
 
+/**
+ * Timeout callback to exit the background process after serving the clipboard.
+ */
+void exit_timeout_cb(void* data) {
+    keep_alive = false;
+}
+
 void grid_cb(Fl_Widget* w, void* data) {
     EmojiGrid* grid = (EmojiGrid*) w;
     Fl_Double_Window* win = (Fl_Double_Window*) data;
@@ -352,14 +360,21 @@ void grid_cb(Fl_Widget* w, void* data) {
     const char* emoji_char = grid->get_selected();
     if (!emoji_char) return;
 
+    // Use native FLTK clipboard instead of spawning a subprocess
+    Fl::copy(emoji_char, strlen(emoji_char), 1);
+
     win->hide();
     Fl::flush();
 
-    // Small delay to allow focus to return to the previous window
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Consolidated delay to allow focus to return and clipboard to settle
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
-    paste_emoji(emoji_char);
-    exit(0);
+    paste_emoji();
+
+    // Do not exit(0) immediately; stay in background to serve the clipboard selection.
+    // Exit after 10 seconds of inactivity or when the timeout is reached by clearing keep_alive.
+    keep_alive = true;
+    Fl::add_timeout(10.0, exit_timeout_cb);
 }
 
 struct PickerUI {
@@ -414,5 +429,9 @@ int main() {
 
     ui.input->take_focus();
 
-    return Fl::run();
+    while (keep_alive || Fl::first_window()) {
+        Fl::wait(1.0);
+    }
+
+    return 0;
 }
