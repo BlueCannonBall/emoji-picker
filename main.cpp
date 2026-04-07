@@ -6,6 +6,7 @@
 #include <FL/Fl_PNG_Image.H>
 #include <FL/Fl_Scroll.H>
 #include <FL/Fl_Shared_Image.H>
+#include <FL/Fl_Tooltip.H>
 #include <FL/fl_draw.H>
 #include <algorithm>
 #include <string>
@@ -186,6 +187,28 @@ public:
 
     int handle(int event) override {
         switch (event) {
+        case FL_MOVE: {
+            int mx = Fl::event_x() - x();
+            int my = Fl::event_y() - y();
+            int c = mx / item_size;
+            int r = my / item_size;
+            
+            if (c >= 0 && c < cols && r >= 0) {
+                int hover_idx = r * cols + c;
+                if (hover_idx < static_cast<int>(filtered_indices.size())) {
+                    const auto& item = ALL_EMOJIS[filtered_indices[hover_idx]];
+                    Fl_Tooltip::enter_area(this, x() + c * item_size, y() + r * item_size, item_size, item_size, item.name);
+                    return 1;
+                }
+            }
+            Fl_Tooltip::enter_area(this, 0, 0, 0, 0, nullptr);
+            return 1;
+        }
+        case FL_ENTER:
+            return 1; // Receive FL_MOVE
+        case FL_LEAVE:
+            Fl_Tooltip::enter_area(this, 0, 0, 0, 0, nullptr);
+            return 1;
         case FL_PUSH: {
             int mx = Fl::event_x() - x();
             int my = Fl::event_y() - y();
@@ -210,6 +233,9 @@ public:
     void set_selected_idx(int idx) {
         if (idx >= 0 && idx < static_cast<int>(filtered_indices.size())) {
             selected_idx = idx;
+            const auto& item = ALL_EMOJIS[filtered_indices[selected_idx]];
+            tooltip(item.name); // Update tooltip on keyboard navigation too
+            
             int r = selected_idx / cols;
             int item_y = r * item_size;
             Fl_Scroll* scroll = (Fl_Scroll*) parent();
