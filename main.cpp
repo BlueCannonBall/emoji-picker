@@ -35,6 +35,7 @@ class EmojiGrid : public Fl_Widget {
     int cols = 1;
     int selected_idx = 0;
     std::vector<std::string> search_index;
+    std::vector<bool> has_variants;
     size_t prep_index = 0;
 
     static void idle_prep(void* data) {
@@ -73,6 +74,15 @@ public:
             std::string searchable = std::string(ALL_EMOJIS[i].tags) + " " + ALL_EMOJIS[i].name;
             std::transform(searchable.begin(), searchable.end(), searchable.begin(), ::tolower);
             search_index.push_back(std::move(searchable));
+
+            bool variations = false;
+            for (int v = 0; v < 5; ++v) {
+                if (ALL_EMOJIS[i].skin_variations[v]) {
+                    variations = true;
+                    break;
+                }
+            }
+            has_variants.push_back(variations);
         }
         cols = W / item_size;
         if (cols < 1) cols = 1;
@@ -143,6 +153,9 @@ public:
         if (start_row < 0) start_row = 0;
         int end_row = (view_y + view_h + item_size - 1) / item_size;
 
+        bool dark = is_dark_mode();
+        Fl_Color fold_color = dark ? fl_rgb_color(160, 160, 160) : fl_rgb_color(180, 180, 180);
+
         for (int r = start_row; r <= end_row; ++r) {
             for (int c = 0; c < cols; ++c) {
                 int idx = r * cols + c;
@@ -171,21 +184,8 @@ public:
                 }
 
                 // Draw corner fold for emojis with variations
-                const auto& item = ALL_EMOJIS[real_idx];
-                bool has_variations = false;
-                for (int v = 0; v < 5; ++v) {
-                    if (item.skin_variations[v]) {
-                        has_variations = true;
-                        break;
-                    }
-                }
-
-                if (has_variations) {
-                    if (is_dark_mode()) {
-                        fl_color(fl_rgb_color(160, 160, 160)); // Medium-light grey for dark mode
-                    } else {
-                        fl_color(fl_rgb_color(180, 180, 180)); // Medium-dark grey for light mode
-                    }
+                if (has_variants[real_idx]) {
+                    fl_color(fold_color);
                     const int fs = 6;
                     fl_begin_polygon();
                     fl_vertex(item_x + item_size, item_y + item_size - fs);
